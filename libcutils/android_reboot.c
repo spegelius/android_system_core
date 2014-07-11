@@ -20,7 +20,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include <cutils/android_reboot.h>
@@ -104,51 +103,28 @@ static void remount_ro(void)
 
 int android_reboot(int cmd, int flags, char *arg)
 {
-    int ret = 0;
-    int reason = -1;
+    int ret;
 
-#ifdef RECOVERY_PRE_COMMAND
-    if (cmd == (int) ANDROID_RB_RESTART2) {
-        if (arg && strlen(arg) > 0) {
-            char cmd[PATH_MAX];
-            sprintf(cmd, RECOVERY_PRE_COMMAND " %s", arg);
-            system(cmd);
-        }
-    }
-#endif
-
-    if (!(flags & ANDROID_RB_FLAG_NO_SYNC))
-        sync();
-
-    if (!(flags & ANDROID_RB_FLAG_NO_REMOUNT_RO))
-        remount_ro();
+    sync();
+    remount_ro();
 
     switch (cmd) {
         case ANDROID_RB_RESTART:
-            reason = RB_AUTOBOOT;
+            ret = reboot(RB_AUTOBOOT);
             break;
 
         case ANDROID_RB_POWEROFF:
             ret = reboot(RB_POWER_OFF);
-            return ret;
+            break;
 
         case ANDROID_RB_RESTART2:
-            // REBOOT_MAGIC
+            ret = __reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+                           LINUX_REBOOT_CMD_RESTART2, arg);
             break;
 
         default:
-            return -1;
+            ret = -1;
     }
-
-#ifdef RECOVERY_PRE_COMMAND_CLEAR_REASON
-    reason = RB_AUTOBOOT;
-#endif
-
-    if (reason != -1)
-        ret = reboot(reason);
-    else
-        ret = __reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
-                           LINUX_REBOOT_CMD_RESTART2, arg);
 
     return ret;
 }

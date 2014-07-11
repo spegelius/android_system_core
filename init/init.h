@@ -55,7 +55,6 @@ struct socketinfo {
     uid_t uid;
     gid_t gid;
     int perm;
-    const char *socketcon;
 };
 
 struct svcenvinfo {
@@ -73,10 +72,9 @@ struct svcenvinfo {
 #define SVC_RESET       0x40  /* Use when stopping a process, but not disabling
                                  so it can be restarted with its class */
 #define SVC_RC_DISABLED 0x80  /* Remember if the disabled flag was set in the rc script */
+#define SVC_RESTART     0x100 /* Use to safely restart (stop, wait, start) a service */
 
-#ifndef NR_SVC_SUPP_GIDS
 #define NR_SVC_SUPP_GIDS 12    /* twelve supplementary groups */
-#endif
 
 #define COMMAND_RETRY_TIMEOUT 5
 
@@ -130,14 +128,13 @@ void service_for_each_flags(unsigned matchflags,
                             void (*func)(struct service *svc));
 void service_stop(struct service *svc);
 void service_reset(struct service *svc);
+void service_restart(struct service *svc);
 void service_start(struct service *svc, const char *dynamic_args);
 void property_changed(const char *name, const char *value);
 
-#ifdef INITLOGO
 #define INIT_IMAGE_FILE	"/initlogo.rle"
 
 int load_565rle_image( char *file_name );
-#endif
 
 extern struct selabel_handle *sehandle;
 extern struct selabel_handle *sehandle_prop;

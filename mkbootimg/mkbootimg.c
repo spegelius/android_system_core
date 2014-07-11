@@ -65,8 +65,6 @@ int usage(void)
             "       [ --board <boardname> ]\n"
             "       [ --base <address> ]\n"
             "       [ --pagesize <pagesize> ]\n"
-            "       [ --ramdisk_offset <address> ]\n"
-            "       [ --dt <filename> ]\n"
             "       -o|--output <filename>\n"
             );
     return 1;
@@ -74,7 +72,7 @@ int usage(void)
 
 
 
-static unsigned char padding[131072] = { 0, };
+static unsigned char padding[16384] = { 0, };
 
 int write_padding(int fd, unsigned pagesize, unsigned itemsize)
 {
@@ -107,8 +105,6 @@ int main(int argc, char **argv)
     char *cmdline = "";
     char *bootimg = 0;
     char *board = "";
-    char *dt_fn = 0;
-    void *dt_data = 0;
     unsigned pagesize = 2048;
     int fd;
     SHA_CTX ctx;
@@ -156,12 +152,11 @@ int main(int argc, char **argv)
             board = val;
         } else if(!strcmp(arg,"--pagesize")) {
             pagesize = strtoul(val, 0, 10);
-            if ((pagesize != 2048) && (pagesize != 4096) && (pagesize != 8192) && (pagesize != 16384) && (pagesize != 32768) && (pagesize != 65536) && (pagesize != 131072)) {
+            if ((pagesize != 2048) && (pagesize != 4096)
+                && (pagesize != 8192) && (pagesize != 16384)) {
                 fprintf(stderr,"error: unsupported page size %d\n", pagesize);
                 return -1;
             }
-        } else if(!strcmp(arg, "--dt")) {
-            dt_fn = val;
         } else {
             return usage();
         }
@@ -228,14 +223,6 @@ int main(int argc, char **argv)
         }
     }
 
-    if(dt_fn) {
-        dt_data = load_file(dt_fn, &hdr.dt_size);
-        if (dt_data == 0) {
-            fprintf(stderr,"error: could not load device tree image '%s'\n", dt_fn);
-            return 1;
-        }
-    }
-
     /* put a hash of the contents in the header so boot images can be
      * differentiated based on their first 2k.
      */
@@ -246,10 +233,6 @@ int main(int argc, char **argv)
     SHA_update(&ctx, &hdr.ramdisk_size, sizeof(hdr.ramdisk_size));
     SHA_update(&ctx, second_data, hdr.second_size);
     SHA_update(&ctx, &hdr.second_size, sizeof(hdr.second_size));
-    if(dt_data) {
-        SHA_update(&ctx, dt_data, hdr.dt_size);
-        SHA_update(&ctx, &hdr.dt_size, sizeof(hdr.dt_size));
-    }
     sha = SHA_final(&ctx);
     memcpy(hdr.id, sha,
            SHA_DIGEST_SIZE > sizeof(hdr.id) ? sizeof(hdr.id) : SHA_DIGEST_SIZE);
@@ -274,10 +257,6 @@ int main(int argc, char **argv)
         if(write_padding(fd, pagesize, hdr.ramdisk_size)) goto fail;
     }
 
-    if(dt_data) {
-        if(write(fd, dt_data, hdr.dt_size) != hdr.dt_size) goto fail;
-        if(write_padding(fd, pagesize, hdr.dt_size)) goto fail;
-    }
     return 0;
 
 fail:

@@ -51,8 +51,6 @@ static void parse_line_service(struct parse_state *state, int nargs, char **args
 static void *parse_action(struct parse_state *state, int nargs, char **args);
 static void parse_line_action(struct parse_state *state, int nargs, char **args);
 
-void add_environment(const char *name, const char *value);
-
 #define SECTION 0x01
 #define COMMAND 0x02
 #define OPTION  0x04
@@ -102,7 +100,6 @@ int lookup_keyword(const char *s)
     case 'e':
         if (!strcmp(s, "xec")) return K_exec;
         if (!strcmp(s, "xport")) return K_export;
-        if (!strcmp(s, "xport_rc")) return K_export_rc;
         break;
     case 'g':
         if (!strcmp(s, "roup")) return K_group;
@@ -121,7 +118,6 @@ int lookup_keyword(const char *s)
         break;
     case 'l':
         if (!strcmp(s, "oglevel")) return K_loglevel;
-        if (!strcmp(s, "og")) return K_log;
         if (!strcmp(s, "oad_persist_props")) return K_load_persist_props;
         break;
     case 'm':
@@ -134,6 +130,8 @@ int lookup_keyword(const char *s)
         if (!strcmp(s, "neshot")) return K_oneshot;
         if (!strcmp(s, "nrestart")) return K_onrestart;
         break;
+    case 'p':
+        if (!strcmp(s, "owerctl")) return K_powerctl;
     case 'r':
         if (!strcmp(s, "estart")) return K_restart;
         if (!strcmp(s, "estorecon")) return K_restorecon;
@@ -153,6 +151,7 @@ int lookup_keyword(const char *s)
         if (!strcmp(s, "ocket")) return K_socket;
         if (!strcmp(s, "tart")) return K_start;
         if (!strcmp(s, "top")) return K_stop;
+        if (!strcmp(s, "wapon_all")) return K_swapon_all;
         if (!strcmp(s, "ymlink")) return K_symlink;
         if (!strcmp(s, "ysclktz")) return K_sysclktz;
         break;
@@ -210,8 +209,9 @@ int expand_props(char *dst, const char *src, int dst_size)
     while (*src_ptr && left > 0) {
         char *c;
         char prop[PROP_NAME_MAX + 1];
-        const char *prop_val;
+        char prop_val[PROP_VALUE_MAX];
         int prop_len = 0;
+        int prop_val_len;
 
         c = strchr(src_ptr, '$');
         if (!c) {
@@ -269,14 +269,14 @@ int expand_props(char *dst, const char *src, int dst_size)
             goto err;
         }
 
-        prop_val = property_get(prop);
-        if (!prop_val) {
+        prop_val_len = property_get(prop, prop_val);
+        if (!prop_val_len) {
             ERROR("property '%s' doesn't exist while expanding '%s'\n",
                   prop, src);
             goto err;
         }
 
-        ret = push_chars(&dst_ptr, &left, prop_val, strlen(prop_val));
+        ret = push_chars(&dst_ptr, &left, prop_val, prop_val_len);
         if (ret < 0)
             goto err_nospace;
         src_ptr = c;
@@ -409,63 +409,6 @@ int init_parse_config_file(const char *fn)
 
     parse_config(fn, data);
     DUMP();
-    return 0;
-}
-
-typedef enum {
-    ENV_NOTREADY,
-    ENV_NAME,
-    ENV_VALUE,
-    ENV_WAITFORNEXTLINE,
-} export_rc_state_t;
-
-int init_export_rc_file(const char *fn)
-{
-    char *data;
-    struct parse_state state;
-    char *env = NULL;
-    export_rc_state_t env_state = ENV_NOTREADY;
-
-    data = read_file(fn, 0);
-    if (!data) return -1;
-
-    state.filename = fn;
-    state.line = 0;
-    state.ptr = data;
-    state.nexttoken = 0;
-    state.parse_line = parse_line_no_op;
-    for (;;) {
-        switch (next_token(&state)) {
-        case T_EOF:
-            free(data);
-            return 0;
-        case T_NEWLINE:
-            env_state = ENV_NOTREADY;
-            break;
-        case T_TEXT:
-            switch (env_state) {
-            case ENV_NOTREADY:
-                if (strcmp(state.text, "export") == 0) {
-                    env_state = ENV_NAME;
-                } else {
-                    env_state = ENV_WAITFORNEXTLINE;
-                }
-                break;
-            case ENV_NAME:
-                env = state.text;
-                env_state = ENV_VALUE;
-                break;
-            case ENV_VALUE:
-                add_environment(env, state.text);
-                env_state = ENV_WAITFORNEXTLINE;
-                break;
-            default:
-                break;
-            }
-            break;
-        }
-    }
-
     return 0;
 }
 
@@ -604,7 +547,7 @@ void queue_all_property_triggers()
             const char* equals = strchr(name, '=');
             if (equals) {
                 char prop_name[PROP_NAME_MAX + 1];
-                const char* value;
+                char value[PROP_VALUE_MAX];
                 int length = equals - name;
                 if (length > PROP_NAME_MAX) {
                     ERROR("property name too long in trigger %s", act->name);
@@ -613,9 +556,8 @@ void queue_all_property_triggers()
                     prop_name[length] = 0;
 
                     /* does the property exist, and match the trigger value? */
-                    value = property_get(prop_name);
-                    if (value && (!strcmp(equals + 1, value) ||
-                                  !strcmp(equals + 1, "*"))) {
+                    property_get(prop_name, value);
+                    if (!strcmp(equals + 1, value) ||!strcmp(equals + 1, "*")) {
                         action_add_queue_tail(act);
                     }
                 }
@@ -829,7 +771,7 @@ static void parse_line_service(struct parse_state *state, int nargs, char **args
         svc->envvars = ei;
         break;
     }
-    case K_socket: {/* name type perm [ uid gid context ] */
+    case K_socket: {/* name type perm [ uid gid ] */
         struct socketinfo *si;
         if (nargs < 4) {
             parse_error(state, "socket option requires name, type, perm arguments\n");
@@ -852,8 +794,6 @@ static void parse_line_service(struct parse_state *state, int nargs, char **args
             si->uid = decode_uid(args[4]);
         if (nargs > 5)
             si->gid = decode_uid(args[5]);
-        if (nargs > 6)
-            si->socketcon = args[6];
         si->next = svc->sockets;
         svc->sockets = si;
         break;

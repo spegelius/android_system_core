@@ -127,6 +127,7 @@ void fixup_sys_perms(const char *upath)
     char buf[512];
     struct listnode *node;
     struct perms_ *dp;
+    char *secontext;
 
         /* upaths omit the "/sys" that paths in this list
          * contain, so we add 4 when comparing...
@@ -148,7 +149,14 @@ void fixup_sys_perms(const char *upath)
         INFO("fixup %s %d %d 0%o\n", buf, dp->uid, dp->gid, dp->perm);
         chown(buf, dp->uid, dp->gid);
         chmod(buf, dp->perm);
-        restorecon(buf);
+        if (sehandle) {
+            secontext = NULL;
+            selabel_lookup(sehandle, &secontext, buf, 0);
+            if (secontext) {
+                setfilecon(buf, secontext);
+                freecon(secontext);
+           }
+        }
     }
 }
 
@@ -358,41 +366,6 @@ static void parse_event(const char *msg, struct uevent *uevent)
                     uevent->firmware, uevent->major, uevent->minor);
 }
 
-static char **get_v4l_device_symlinks(struct uevent *uevent)
-{
-    char **links;
-    int fd = -1;
-    int nr;
-    char link_name_path[256];
-    char link_name[64];
-
-    if (strncmp(uevent->path, "/devices/virtual/video4linux/video", 34))
-        return NULL;
-
-    links = malloc(sizeof(char *) * 2);
-    if (!links)
-        return NULL;
-    memset(links, 0, sizeof(char *) * 2);
-
-    snprintf(link_name_path, sizeof(link_name_path), "%s%s%s",
-            SYSFS_PREFIX, uevent->path, "/link_name");
-    fd = open(link_name_path, O_RDONLY);
-    if (fd < 0)
-        goto err;
-    nr = read(fd, link_name, sizeof(link_name) - 1);
-    close(fd);
-    if (nr <= 0)
-        goto err;
-    link_name[nr] = '\0';
-    if (asprintf(&links[0], "/dev/video/%s", link_name) <= 0)
-        links[0] = NULL;
-
-    return links;
-err:
-    free(links);
-    return NULL;
-}
-
 static char **get_character_device_symlinks(struct uevent *uevent)
 {
     const char *parent;
@@ -478,6 +451,8 @@ static char **parse_platform_block_device(struct uevent *uevent)
     if (uevent->partition_name) {
         p = strdup(uevent->partition_name);
         sanitize(p);
+        if (strcmp(uevent->partition_name, p))
+            NOTICE("Linking partition '%s' as '%s'\n", uevent->partition_name, p);
         if (asprintf(&links[link_num], "%s/by-name/%s", link_path, p) > 0)
             link_num++;
         else
@@ -663,8 +638,6 @@ static void handle_generic_device_event(struct uevent *uevent)
      } else
          base = "/dev/";
      links = get_character_device_symlinks(uevent);
-     if (!links)
-         links = get_v4l_device_symlinks(uevent);
 
      if (!devpath[0])
          snprintf(devpath, sizeof(devpath), "%s%s", base, name);
