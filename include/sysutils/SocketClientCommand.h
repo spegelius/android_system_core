@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 The Android Open Source Project
+ * Copyright (C) 2012 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,17 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef _SOCKETCLIENTCOMMAND_H
+#define _SOCKETCLIENTCOMMAND_H
 
-#include <healthd.h>
+#include <sysutils/SocketClient.h>
 
-void healthd_board_init(struct healthd_config *config)
-{
-    // use defaults
-}
+class SocketClientCommand {
+public:
+    virtual ~SocketClientCommand() { }
+    virtual void runSocketCommand(SocketClient *client) = 0;
+};
 
-
-int healthd_board_battery_update(struct android::BatteryProperties *props)
-{
-    // return 0 to log periodic polled battery status to kernel log
-    return 1;
-}
+#endif
