@@ -506,5 +506,5 @@ int restorecon(const char* pathname)
 
 int restorecon_recursive(const char* pathname)
 {
-    return selinux_android_restorecon(pathname);
+    return selinux_android_restorecon2(pathname, SELINUX_ANDROID_RESTORECON_RECURSE);
 }
